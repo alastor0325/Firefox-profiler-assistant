@@ -1,0 +1,25 @@
+[project]
+name = "profiler-assistant"
+version = "0.1.0"
+dependencies = [
+    "orjson",
+    "pandas",
+    "requests",
+]
+
+[project.scripts]
+profiler-analysis = "profiler_assistant.main:main"
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-mock",
+]
+
+# This is the corrected section. It automatically finds all packages
+# inside the 'src' directory, which is the standard practice.
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
