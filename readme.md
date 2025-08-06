@@ -26,6 +26,11 @@ An AI-powered command-line tool to analyze performance profiles from the Firefox
     ```
 
 ## Usage
+First ensure that the virtual environment is running.
+
+```bash
+source venv/Scripts/activate
+```
 
 The tool provides a single entry point for analyzing profiles from either a URL or a local file path.
 
