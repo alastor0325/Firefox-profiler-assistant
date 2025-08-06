@@ -2,9 +2,9 @@
 
 import argparse
 import os
-from.parsing import load_and_parse_profile
-from.downloader import get_profile_from_url
-from.analysis_tools import find_stutter_markers
+from profiler_assistant.parsing import load_and_parse_profile
+from profiler_assistant.downloader import get_profile_from_url
+from profiler_assistant.analysis_tools import find_stutter_markers
 
 def main():
     """
@@ -31,12 +31,19 @@ def main():
 
         profile = load_and_parse_profile(profile_path)
 
-        print("\n--- Profile Summary ---")
-        start_time = profile.meta.get('startTime', 0)
-        end_time = profile.meta.get('endTime', 0)
-        duration = (end_time - start_time) / 1000 if end_time > start_time else 0
-        print(f"Duration: {duration:.2f} seconds")
-        print(f"Found {len(profile.threads)} threads.")
+        # --- Log the structured, filtered, and grouped threads ---
+        print("\n--- Filtered Media/GFX Threads by Process ---")
+        if not profile.processes:
+            print("No relevant media or graphics threads found in the profile.")
+        else:
+            for pid, process_data in profile.processes.items():
+                process_name = process_data.get('name', 'Unknown Process')
+                print(f"\nProcess: {process_name} (PID: {pid})")
+                for thread_data in process_data['threads']:
+                    thread_name = thread_data['name']
+                    sample_count = len(thread_data['samples'])
+                    marker_count = len(thread_data['markers'])
+                    print(f"  - Thread '{thread_name}': {sample_count} samples, {marker_count} markers")
 
         # --- Run Analysis Tools ---
         print("\n--- Running Analysis ---")
@@ -45,7 +52,6 @@ def main():
 
         if not stutter_events.empty:
             print(f"[!] Found {len(stutter_events)} potential stutter/jank events:")
-            # Print the results in a clean table format
             print(stutter_events.to_string(index=False))
         else:
             print("[+] No common stutter or jank markers found in the profile.")
