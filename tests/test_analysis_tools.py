@@ -15,32 +15,47 @@ def stutter_profile_file(tmp_path):
         "threads": [
             {
                 "name": "Compositor",
+                "pid": 1,
+                "tid": 11,
+                "processName": "GPU",
                 "markers": {
-                    "schema": {"name": 0, "time": 1},
-                    "data": [
-                        [0, 150.0],  # OtherMarker
-                        [1, 250.5]   # Jank
-                    ]
-                },
+                    "name": [0, 1],  # OtherMarker, Jank
+                    "startTime": [150.0, 250.5],
+                    "endTime": [150.5, 251.0],
+                    "phase": [0, 0],
+                    "category": [1, 1],
+                    "data": [{}, {}]
+                }
             },
             {
                 "name": "MediaDecoder",
+                "pid": 1,
+                "tid": 12,
+                "processName": "GPU",
                 "markers": {
-                    "schema": {"name": 0, "time": 1},
-                    "data": [
-                        [2, 300.1],  # VideoFallingBehind
-                        [2, 450.8]
-                    ]
+                    "name": [2, 2],  # VideoFallingBehind
+                    "startTime": [300.1, 450.8],
+                    "endTime": [300.2, 451.0],
+                    "phase": [0, 0],
+                    "category": [1, 1],
+                    "data": [{}, {}]
                 }
             },
             {
                 "name": "GeckoMain",
+                "pid": 2,
+                "tid": 13,
+                "processName": "WEB",
                 "markers": {
-                    "schema": {"name": 0, "time": 1},
-                    "data": [[0, 100.0]]
+                    "name": [0],  # OtherMarker
+                    "startTime": [100.0],
+                    "endTime": [101.0],
+                    "phase": [0],
+                    "category": [1],
+                    "data": [{}]
                 }
             }
-        ],
+        ]
     }
     file_path = tmp_path / "stutter_profile.json"
     file_path.write_text(json.dumps(profile_data))

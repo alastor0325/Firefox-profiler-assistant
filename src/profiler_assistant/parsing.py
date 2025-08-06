@@ -29,10 +29,34 @@ class Profile:
         # Process and group threads
         self.processes = self._process_and_group_threads(data.get("threads") or [])
 
-    def _create_table_df(self, data: Dict[str, Any], table_name: str) -> pd.DataFrame:
-        table_data = data.get(table_name)
+    def _create_table_df(self, data_or_table: Any, table_name: str = None) -> pd.DataFrame:
+        """
+        Convert schema/data structured profiler table into a DataFrame.
+        Supports both:
+        - _create_table_df(data, "frameTable")
+        - _create_table_df(data.get("samples"))
+        """
+        if table_name is not None:
+            # Called with parent data and table name
+            table_data = data_or_table.get(table_name)
+        else:
+            # Called with table object directly
+            table_data = data_or_table
+
         if isinstance(table_data, dict) and "schema" in table_data and "data" in table_data:
             return pd.DataFrame(table_data["data"], columns=table_data["schema"].keys())
+        return pd.DataFrame()
+
+    def _normalize_column_table(self, table_obj: Any) -> pd.DataFrame:
+        """
+        Converts a column-oriented table (like samples or markers) into a DataFrame.
+        Expects a dict of arrays.
+        """
+        if isinstance(table_obj, dict):
+            try:
+                return pd.DataFrame.from_dict(table_obj)
+            except Exception as e:
+                print(f"[!] Failed to parse column table: {e}")
         return pd.DataFrame()
 
     def _is_relevant_thread(self, thread_name: str) -> bool:
@@ -62,8 +86,8 @@ class Profile:
                     "pid": pid,
                     "tid": thread_data.get("tid"),
                     "process_name": process_name,
-                    "samples": self._create_table_df(thread_data, "samples"),
-                    "markers": self._create_table_df(thread_data, "markers"),
+                    "samples": self._normalize_column_table(thread_data.get("samples")),
+                    "markers": self._normalize_column_table(thread_data.get("markers")),
                 }
 
                 threads_by_pid[pid].append(thread_info)
