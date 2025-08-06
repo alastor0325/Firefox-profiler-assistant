@@ -105,6 +105,11 @@ def test_load_and_parse_profile(sample_profile_file):
     assert 'stack' in media_thread['samples'].columns
     assert 'startTime' in media_thread['markers'].columns
 
+     # Ensure "NetworkingThread" was filtered out
+    for process in profile.processes.values():
+        for thread in process["threads"]:
+            assert thread["name"] != "NetworkingThread", "Filtered thread was mistakenly included"
+
 def test_load_nonexistent_file():
     """Tests that a FileNotFoundError is raised for a missing file."""
     with pytest.raises(FileNotFoundError):
