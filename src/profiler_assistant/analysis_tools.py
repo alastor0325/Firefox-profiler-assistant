@@ -3,6 +3,7 @@
 import pandas as pd
 from copy import deepcopy
 from.parsing import Profile
+from typing import Optional
 
 def find_stutter_markers(profile: Profile) -> pd.DataFrame:
     """
@@ -74,11 +75,9 @@ def find_video_sink_dropped_frames(profile: Profile) -> pd.DataFrame:
     Returns:
     pd.DataFrame: Rows with marker name, thread name, process name, and time.
     """
-    df = extract_markers_by_name(profile, ["VideoSinkDroppedFrame"])
-    return df[
-        (df["threadName"] == "MediaDecoderStateMachine") &
-        (df["processName"] == "Isolated Web Content")
-    ].reset_index(drop=True)
+    media_profile = extract_process(profile, name="Isolated Web Content")
+    df = extract_markers_by_name(media_profile, ["VideoSinkDroppedFrame"])
+    return df[df["threadName"] == "MediaDecoderStateMachine"].reset_index(drop=True)
 
 def extract_markers_from_threads(profile: Profile, thread_names: list[str]) -> pd.DataFrame:
     """
@@ -174,3 +173,27 @@ def extract_markers_by_name(profile: Profile, marker_names: list[str]) -> pd.Dat
                 })
 
     return pd.DataFrame(collected)
+
+
+def extract_process(profile: Profile, *, name: Optional[str] = None, pid: Optional[int] = None) -> Profile:
+    if name is None and pid is None:
+        raise ValueError("Either 'name' or 'pid' must be provided.")
+
+    for candidate_pid, process in profile.processes.items():
+        if pid is not None and candidate_pid == pid:
+            result = deepcopy(profile)
+            result.processes = {candidate_pid: deepcopy(process)}
+            return result
+        elif name is not None:
+            # Match on process["name"]
+            if process.get("name") == name:
+                result = deepcopy(profile)
+                result.processes = {candidate_pid: deepcopy(process)}
+                return result
+            # OR match based on any thread's `process_name`
+            elif any(t.get("process_name") == name for t in process.get("threads", [])):
+                result = deepcopy(profile)
+                result.processes = {candidate_pid: deepcopy(process)}
+                return result
+
+    raise ValueError("No matching process found.")

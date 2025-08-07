@@ -13,6 +13,7 @@ from profiler_assistant.analysis_tools import (
     extract_markers_from_threads,
     crop_profile_by_time,
     extract_markers_by_name,
+    extract_process,
 )
 
 @pytest.fixture
@@ -348,3 +349,41 @@ def test_extract_markers_by_name():
     assert set(result["threadName"]) == {"Decoder"}
     assert set(result["time"]) == {10.0, 30.0}
     assert all(result["processName"] == "Content")
+
+def test_extract_process_by_name():
+    class MockProfile(Profile):
+        def __init__(self):
+            self.string_table = {}
+            self.processes = {
+                10: {"name": "Web Content", "threads": [
+                    {"name": "Thread1", "markers": pd.DataFrame({"name": [0], "startTime": [100.0]}), "process_name": "Web Content"}
+                ]},
+                20: {"name": "GPU", "threads": [
+                    {"name": "Thread2", "markers": pd.DataFrame({"name": [1], "startTime": [200.0]}), "process_name": "GPU"}
+                ]},
+            }
+
+    profile = MockProfile()
+    extracted = extract_process(profile, name="GPU")
+
+    assert isinstance(extracted, Profile)
+    assert list(extracted.processes.keys()) == [20]
+    assert extracted.processes[20]["name"] == "GPU"
+    assert len(extracted.processes[20]["threads"]) == 1
+
+
+def test_extract_process_by_pid():
+    class MockProfile(Profile):
+        def __init__(self):
+            self.string_table = {}
+            self.processes = {
+                10: {"name": "Web Content", "threads": []},
+                42: {"name": "Audio", "threads": []},
+            }
+
+    profile = MockProfile()
+    extracted = extract_process(profile, pid=42)
+
+    assert isinstance(extracted, Profile)
+    assert list(extracted.processes.keys()) == [42]
+    assert extracted.processes[42]["name"] == "Audio"
