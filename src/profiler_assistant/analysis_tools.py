@@ -1,6 +1,7 @@
 # src/profiler_assistant/analysis_tools.py
 
 import pandas as pd
+from copy import deepcopy
 from.parsing import Profile
 
 def find_stutter_markers(profile: Profile) -> pd.DataFrame:
@@ -173,3 +174,27 @@ def extract_markers_from_threads(profile: Profile, thread_names: list[str]) -> p
                 })
 
     return pd.DataFrame(collected)
+
+def crop_profile_by_time(profile: Profile, start: float, end: float) -> Profile:
+    """
+    Return a new Profile with all time-based thread data (e.g., markers, samples)
+    cropped to the given time range.
+
+    Parameters:
+    profile (Profile): The original full profile.
+    start (float): Start time (inclusive).
+    end (float): End time (inclusive).
+
+    Returns:
+    Profile: A new Profile instance with all relevant thread data cropped.
+    """
+    cropped = deepcopy(profile)
+
+    for process in cropped.processes.values():
+        for thread in process.get("threads", []):
+            for key, df in thread.items():
+                if isinstance(df, pd.DataFrame) and "startTime" in df.columns:
+                    mask = (df["startTime"] >= start) & (df["startTime"] <= end)
+                    thread[key] = df[mask].reset_index(drop=True)
+
+    return cropped

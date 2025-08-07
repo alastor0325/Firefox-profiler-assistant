@@ -11,6 +11,7 @@ from profiler_assistant.analysis_tools import (
     find_rendering_process,
     find_video_sink_dropped_frames,
     extract_markers_from_threads,
+    crop_profile_by_time,
 )
 
 @pytest.fixture
@@ -287,3 +288,33 @@ def test_extract_markers_from_threads():
     assert set(result["threadName"]) == {"Decoder", "Compositor"}
     assert set(result["processName"]) == {"Web Content"}
     assert set(result["time"]) == {123.0, 456.0, 789.0}
+
+def test_crop_profile_by_time():
+    class MockProfile(Profile):
+        def __init__(self):
+            self.string_table = {0: "MarkerA", 1: "MarkerB"}
+            self.processes = {
+                1: {
+                    "name": "Web Content",
+                    "threads": [
+                        {
+                            "name": "Compositor",
+                            "process_name": "Web Content",
+                            "markers": pd.DataFrame({
+                                "name": [0, 1, 0],
+                                "startTime": [100.0, 150.0, 300.0]
+                            })
+                        }
+                    ]
+                }
+            }
+
+    profile = MockProfile()
+    cropped = crop_profile_by_time(profile, start=120.0, end=200.0)
+
+    thread = cropped.processes[1]["threads"][0]
+    markers = thread["markers"]
+
+    assert len(markers) == 1
+    assert markers.iloc[0]["startTime"] == 150.0
+    assert profile.processes[1]["threads"][0]["markers"].shape[0] == 3  # original untouched
