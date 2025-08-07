@@ -9,38 +9,7 @@ def find_stutter_markers(profile: Profile) -> pd.DataFrame:
     Scans all threads in a profile for common stutter-related markers.
     Returns a DataFrame with matched marker name, thread name, and time.
     """
-    stutter_marker_names = {"Jank", "VideoFallingBehind"}
-    found = []
-
-    # Map marker name → stringTable index
-    string_index_map = {
-        idx: name
-        for idx, name in profile.string_table.items()
-        if name in stutter_marker_names
-    }
-
-    if not string_index_map:
-        return pd.DataFrame()
-
-    for process in profile.processes.values():
-        for thread in process["threads"]:
-            markers_df = thread["markers"]
-            if markers_df.empty:
-                continue
-            if "name" not in markers_df or "startTime" not in markers_df:
-                continue
-
-            mask = markers_df["name"].isin(string_index_map.keys())
-            for _, row in markers_df[mask].iterrows():
-                marker_idx = row["name"]
-                found.append({
-                    "markerName": string_index_map[marker_idx],
-                    "threadName": thread["name"],
-                    "processName": thread["process_name"],
-                    "time": row["startTime"]
-                })
-
-    return pd.DataFrame(found)
+    return extract_markers_by_name(profile, ["Jank", "VideoFallingBehind"])
 
 def find_media_playback_content_processes(profile: Profile) -> pd.DataFrame:
     """
@@ -105,40 +74,11 @@ def find_video_sink_dropped_frames(profile: Profile) -> pd.DataFrame:
     Returns:
     pd.DataFrame: Rows with marker name, thread name, process name, and time.
     """
-    target_marker = "VideoSinkDroppedFrame"
-    found = []
-
-    marker_indices = {
-        idx for idx, name in profile.string_table.items()
-        if name == target_marker
-    }
-    if not marker_indices:
-        return pd.DataFrame()
-
-    for process in profile.processes.values():
-        if process.get("process_name") != "Isolated Web Content":
-            continue
-
-        for thread in process.get("threads", []):
-            if thread.get("name") != "MediaDecoderStateMachine":
-                continue
-
-            markers_df = thread.get("markers")
-            if markers_df is None or markers_df.empty:
-                continue
-            if "name" not in markers_df or "startTime" not in markers_df:
-                continue
-
-            mask = markers_df["name"].isin(marker_indices)
-            for _, row in markers_df[mask].iterrows():
-                found.append({
-                    "markerName": target_marker,
-                    "threadName": thread["name"],
-                    "processName": thread["process_name"],
-                    "time": row["startTime"]
-                })
-
-    return pd.DataFrame(found)
+    df = extract_markers_by_name(profile, ["VideoSinkDroppedFrame"])
+    return df[
+        (df["threadName"] == "MediaDecoderStateMachine") &
+        (df["processName"] == "Isolated Web Content")
+    ].reset_index(drop=True)
 
 def extract_markers_from_threads(profile: Profile, thread_names: list[str]) -> pd.DataFrame:
     """
