@@ -197,3 +197,21 @@ def extract_process(profile: Profile, *, name: Optional[str] = None, pid: Option
                 return result
 
     raise ValueError("No matching process found.")
+
+def get_all_marker_names(profile: Profile) -> list[str]:
+    return sorted(set(profile.string_table.tolist()))
+
+def get_all_thread_names(profile: Profile) -> list[str]:
+    names = {
+        thread.get("name")
+        for process in profile.processes.values()
+        for thread in process.get("threads", [])
+    }
+    return sorted(name for name in names if name)
+
+def get_cpu_usage_for_thread(thread: dict) -> pd.DataFrame:
+    samples = thread.get("samples")
+    if samples is None or samples.empty or "time" not in samples or "threadCPUDelta" not in samples:
+        return pd.DataFrame()
+    df = samples[["time", "threadCPUDelta"]].copy()
+    return df

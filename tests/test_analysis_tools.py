@@ -14,6 +14,9 @@ from profiler_assistant.analysis_tools import (
     crop_profile_by_time,
     extract_markers_by_name,
     extract_process,
+    get_all_marker_names,
+    get_all_thread_names,
+    get_cpu_usage_for_thread,
 )
 
 @pytest.fixture
@@ -387,3 +390,58 @@ def test_extract_process_by_pid():
     assert isinstance(extracted, Profile)
     assert list(extracted.processes.keys()) == [42]
     assert extracted.processes[42]["name"] == "Audio"
+
+def test_get_all_marker_names():
+    class MockProfile(Profile):
+        def __init__(self):
+            self.string_table = pd.Series(["A", "B", "C", "A"])  # A repeated
+            self.processes = {}
+
+    profile = MockProfile()
+    result = get_all_marker_names(profile)
+    assert result == ["A", "B", "C"]
+
+def test_get_all_thread_names():
+    class MockProfile(Profile):
+        def __init__(self):
+            self.processes = {
+                1: {
+                    "threads": [
+                        {"name": "Thread1"},
+                        {"name": "Thread2"}
+                    ]
+                },
+                2: {
+                    "threads": [
+                        {"name": "Thread1"},
+                        {"name": "Thread3"}
+                    ]
+                }
+            }
+
+    profile = MockProfile()
+    result = get_all_thread_names(profile)
+    assert result == ["Thread1", "Thread2", "Thread3"]
+
+def test_get_cpu_usage_for_thread():
+    thread = {
+        "samples": pd.DataFrame({
+            "time": [100.0, 101.0, 103.5],
+            "threadCPUDelta": [0.1, 0.2, 0.3]
+        })
+    }
+    result = get_cpu_usage_for_thread(thread)
+    assert list(result["threadCPUDelta"]) == [0.1, 0.2, 0.3]
+    assert list(result["time"]) == [100.0, 101.0, 103.5]
+
+
+def test_get_cpu_usage_for_thread_empty():
+    thread = {"samples": pd.DataFrame()}
+    result = get_cpu_usage_for_thread(thread)
+    assert result.empty
+
+
+def test_get_cpu_usage_for_thread_missing_time():
+    thread = {"samples": pd.DataFrame({"value": [1, 2, 3]})}
+    result = get_cpu_usage_for_thread(thread)
+    assert result.empty
