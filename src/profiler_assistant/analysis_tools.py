@@ -91,3 +91,50 @@ def find_rendering_process(profile: Profile) -> pd.Series:
             return pd.Series(process)
 
     raise ValueError("No rendering process found")
+
+
+def find_video_sink_dropped_frames(profile: Profile) -> pd.DataFrame:
+    """
+    Return all VideoSinkDroppedFrame markers from MediaDecoderStateMachine threads
+    within 'Isolated Web Content' processes (media processes).
+
+    Parameters:
+    profile (Profile): Parsed profiler data.
+
+    Returns:
+    pd.DataFrame: Rows with marker name, thread name, process name, and time.
+    """
+    target_marker = "VideoSinkDroppedFrame"
+    found = []
+
+    marker_indices = {
+        idx for idx, name in profile.string_table.items()
+        if name == target_marker
+    }
+    if not marker_indices:
+        return pd.DataFrame()
+
+    for process in profile.processes.values():
+        if process.get("process_name") != "Isolated Web Content":
+            continue
+
+        for thread in process.get("threads", []):
+            if thread.get("name") != "MediaDecoderStateMachine":
+                continue
+
+            markers_df = thread.get("markers")
+            if markers_df is None or markers_df.empty:
+                continue
+            if "name" not in markers_df or "startTime" not in markers_df:
+                continue
+
+            mask = markers_df["name"].isin(marker_indices)
+            for _, row in markers_df[mask].iterrows():
+                found.append({
+                    "markerName": target_marker,
+                    "threadName": thread["name"],
+                    "processName": thread["process_name"],
+                    "time": row["startTime"]
+                })
+
+    return pd.DataFrame(found)

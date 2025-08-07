@@ -9,6 +9,7 @@ from profiler_assistant.analysis_tools import (
     find_stutter_markers,
     find_media_playback_content_processes,
     find_rendering_process,
+    find_video_sink_dropped_frames,
 )
 
 @pytest.fixture
@@ -181,3 +182,57 @@ def test_find_rendering_process_no_match():
     profile = MockProfile()
     with pytest.raises(ValueError, match="No rendering process found"):
         find_rendering_process(profile)
+
+def test_find_video_sink_dropped_frames():
+    class MockProfile(Profile):
+        def __init__(self):
+            self.string_table = {
+                0: "VideoSinkDroppedFrame",
+                1: "OtherMarker"
+            }
+            self.processes = {
+                "1": {
+                    "process_name": "Isolated Web Content",
+                    "pid": 10,
+                    "threads": [
+                        {
+                            "name": "MediaDecoderStateMachine",
+                            "process_name": "Isolated Web Content",
+                            "markers": pd.DataFrame({
+                                "name": [0, 1, 0],
+                                "startTime": [10.5, 20.0, 30.25]
+                            })
+                        },
+                        {
+                            "name": "OtherThread",
+                            "process_name": "Isolated Web Content",
+                            "markers": pd.DataFrame()
+                        }
+                    ]
+                },
+                "2": {
+                    "process_name": "Web Content",
+                    "pid": 20,
+                    "threads": [
+                        {
+                            "name": "MediaDecoderStateMachine",
+                            "process_name": "Web Content",
+                            "markers": pd.DataFrame({
+                                "name": [0],
+                                "startTime": [100.0]
+                            })
+                        }
+                    ]
+                }
+            }
+
+    profile = MockProfile()
+    result = find_video_sink_dropped_frames(profile)
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 2
+    assert all(result["markerName"] == "VideoSinkDroppedFrame")
+    assert all(result["threadName"] == "MediaDecoderStateMachine")
+    assert all(result["processName"] == "Isolated Web Content")
+    assert set(result["time"]) == {10.5, 30.25}
+
