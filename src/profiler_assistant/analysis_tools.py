@@ -138,3 +138,38 @@ def find_video_sink_dropped_frames(profile: Profile) -> pd.DataFrame:
                 })
 
     return pd.DataFrame(found)
+
+def extract_markers_from_threads(profile: Profile, thread_names: list[str]) -> pd.DataFrame:
+    """
+    Extract all markers from threads whose name matches any in the given list.
+
+    Parameters:
+    profile (Profile): Parsed profiler data.
+    thread_names (list[str]): Names of threads to extract markers from.
+
+    Returns:
+    pd.DataFrame: DataFrame of marker entries with thread name and process name.
+    """
+    collected = []
+
+    for process in profile.processes.values():
+        for thread in process.get("threads", []):
+            if thread.get("name") not in thread_names:
+                continue
+
+            markers_df = thread.get("markers")
+            if markers_df is None or markers_df.empty:
+                continue
+
+            if "name" not in markers_df or "startTime" not in markers_df:
+                continue
+
+            for _, row in markers_df.iterrows():
+                collected.append({
+                    "markerName": profile.string_table.get(row["name"], f"stringId:{row['name']}"),
+                    "threadName": thread["name"],
+                    "processName": thread.get("process_name", "unknown"),
+                    "time": row["startTime"]
+                })
+
+    return pd.DataFrame(collected)

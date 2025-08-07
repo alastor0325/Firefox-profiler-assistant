@@ -10,6 +10,7 @@ from profiler_assistant.analysis_tools import (
     find_media_playback_content_processes,
     find_rendering_process,
     find_video_sink_dropped_frames,
+    extract_markers_from_threads,
 )
 
 @pytest.fixture
@@ -236,3 +237,53 @@ def test_find_video_sink_dropped_frames():
     assert all(result["processName"] == "Isolated Web Content")
     assert set(result["time"]) == {10.5, 30.25}
 
+def test_extract_markers_from_threads():
+    class MockProfile(Profile):
+        def __init__(self):
+            self.string_table = {
+                0: "MarkerA",
+                1: "MarkerB"
+            }
+            self.processes = {
+                "a": {
+                    "process_name": "Web Content",
+                    "threads": [
+                        {
+                            "name": "Decoder",
+                            "process_name": "Web Content",
+                            "markers": pd.DataFrame({
+                                "name": [0, 1],
+                                "startTime": [123.0, 456.0]
+                            })
+                        },
+                        {
+                            "name": "Compositor",
+                            "process_name": "Web Content",
+                            "markers": pd.DataFrame({
+                                "name": [1],
+                                "startTime": [789.0]
+                            })
+                        }
+                    ]
+                },
+                "b": {
+                    "process_name": "GPU",
+                    "threads": [
+                        {
+                            "name": "Renderer",
+                            "process_name": "GPU",
+                            "markers": pd.DataFrame()
+                        }
+                    ]
+                }
+            }
+
+    profile = MockProfile()
+    result = extract_markers_from_threads(profile, ["Decoder", "Compositor"])
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 3
+    assert set(result["markerName"]) == {"MarkerA", "MarkerB"}
+    assert set(result["threadName"]) == {"Decoder", "Compositor"}
+    assert set(result["processName"]) == {"Web Content"}
+    assert set(result["time"]) == {123.0, 456.0, 789.0}
