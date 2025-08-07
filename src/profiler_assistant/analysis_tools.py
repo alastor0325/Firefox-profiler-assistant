@@ -41,3 +41,53 @@ def find_stutter_markers(profile: Profile) -> pd.DataFrame:
 
     return pd.DataFrame(found)
 
+def find_media_playback_content_processes(profile: Profile) -> pd.DataFrame:
+    """
+    Return all 'Isolated Web Content' processes that have media playback activity.
+
+    A process qualifies if:
+    - It is named 'Isolated Web Content'
+    - It contains a thread named 'MediaDecoderStateMachine' with markers
+
+    Parameters:
+    profile (Profile): Parsed profiler data.
+
+    Returns:
+    pd.DataFrame: Filtered DataFrame with only the matching processes.
+    """
+    matching_processes = []
+
+    for process in profile.processes.values():
+        if process.get("process_name") != "Isolated Web Content":
+            continue
+
+        threads = process.get("threads", [])
+        for thread in threads:
+            if (
+                thread.get("name") == "MediaDecoderStateMachine"
+                and thread.get("markers")
+                and len(thread["markers"]) > 0
+            ):
+                matching_processes.append(process)
+                break
+
+    return pd.DataFrame(matching_processes)
+
+def find_rendering_process(profile: Profile) -> pd.Series:
+    """
+    Return the first process that contains both a Renderer and Compositor thread.
+
+    Parameters:
+    profile (Profile): Parsed profiler data.
+
+    Returns:
+    pd.Series: The first matching process row.
+    """
+    for process in profile.processes.values():
+        threads = process.get("threads", [])
+        thread_names = {thread.get("name") for thread in threads}
+
+        if "Renderer" in thread_names and "Compositor" in thread_names:
+            return pd.Series(process)
+
+    raise ValueError("No rendering process found")

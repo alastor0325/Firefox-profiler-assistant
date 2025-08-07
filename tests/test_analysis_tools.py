@@ -1,10 +1,15 @@
 # tests/test_analysis_tools.py
 
+import pandas as pd
 import pytest
 import json
 from pathlib import Path
-from profiler_assistant.parsing import load_and_parse_profile
-from profiler_assistant.analysis_tools import find_stutter_markers
+from profiler_assistant.parsing import Profile, load_and_parse_profile
+from profiler_assistant.analysis_tools import (
+    find_stutter_markers,
+    find_media_playback_content_processes,
+    find_rendering_process,
+)
 
 @pytest.fixture
 def stutter_profile_file(tmp_path):
@@ -84,3 +89,95 @@ def test_find_stutter_markers(stutter_profile_file):
     assert 250.5 in stutter_events['time'].values
     assert 300.1 in stutter_events['time'].values
     assert 450.8 in stutter_events['time'].values
+
+def test_find_media_playback_content_processes():
+    class MockProfile(Profile):
+        def __init__(self):
+            self.processes = {
+                "0": {
+                    "process_name": "Isolated Web Content",
+                    "pid": 100,
+                    "threads": [
+                        {"name": "MediaDecoderStateMachine", "markers": ["marker1"]},
+                        {"name": "OtherThread", "markers": []},
+                    ]
+                },
+                "1": {
+                    "process_name": "Isolated Web Content",
+                    "pid": 101,
+                    "threads": [
+                        {"name": "MediaDecoderStateMachine", "markers": []}
+                    ]
+                },
+                "2": {
+                    "process_name": "Web Content",
+                    "pid": 102,
+                    "threads": [
+                        {"name": "MediaDecoderStateMachine", "markers": ["marker2"]}
+                    ]
+                },
+            }
+
+    profile = MockProfile()
+    result = find_media_playback_content_processes(profile)
+
+    assert len(result) == 1
+    assert result.iloc[0]["pid"] == 100
+
+def test_find_rendering_process():
+    class MockProfile(Profile):
+        def __init__(self):
+            self.processes = {
+                "a": {
+                    "process_name": "Web Content",
+                    "pid": 200,
+                    "threads": [
+                        {"name": "Renderer", "markers": ["draw"]},
+                        {"name": "Compositor", "markers": ["composite"]},
+                    ]
+                },
+                "b": {
+                    "process_name": "Web Content",
+                    "pid": 201,
+                    "threads": [
+                        {"name": "Renderer", "markers": ["draw"]},
+                    ]
+                },
+                "c": {
+                    "process_name": "Web Content",
+                    "pid": 202,
+                    "threads": [
+                        {"name": "Compositor", "markers": ["composite"]},
+                    ]
+                },
+            }
+
+    profile = MockProfile()
+    result = find_rendering_process(profile)
+
+    assert isinstance(result, pd.Series)
+    assert result["pid"] == 200
+
+def test_find_rendering_process_no_match():
+    class MockProfile(Profile):
+        def __init__(self):
+            self.processes = {
+                "x": {
+                    "process_name": "Web Content",
+                    "pid": 301,
+                    "threads": [
+                        {"name": "Renderer", "markers": ["draw"]},
+                    ]
+                },
+                "y": {
+                    "process_name": "Web Content",
+                    "pid": 302,
+                    "threads": [
+                        {"name": "Compositor", "markers": ["composite"]},
+                    ]
+                },
+            }
+
+    profile = MockProfile()
+    with pytest.raises(ValueError, match="No rendering process found"):
+        find_rendering_process(profile)
