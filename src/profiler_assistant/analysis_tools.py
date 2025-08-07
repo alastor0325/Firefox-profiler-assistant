@@ -198,3 +198,39 @@ def crop_profile_by_time(profile: Profile, start: float, end: float) -> Profile:
                     thread[key] = df[mask].reset_index(drop=True)
 
     return cropped
+
+def extract_markers_by_name(profile: Profile, marker_names: list[str]) -> pd.DataFrame:
+    """
+    Extract all markers with names in the given list from all relevant threads.
+
+    Parameters:
+    profile (Profile): Parsed profiler data.
+    marker_names (list[str]): Marker names to look for.
+
+    Returns:
+    pd.DataFrame: DataFrame of matching markers with thread and process metadata.
+    """
+    name_to_id = {
+        idx: name for idx, name in profile.string_table.items()
+        if name in marker_names
+    }
+
+    collected = []
+
+    for process in profile.processes.values():
+        for thread in process.get("threads", []):
+            markers_df = thread.get("markers")
+            if markers_df is None or markers_df.empty or "name" not in markers_df:
+                continue
+
+            mask = markers_df["name"].isin(name_to_id.keys())
+            for _, row in markers_df[mask].iterrows():
+                marker_id = row["name"]
+                collected.append({
+                    "markerName": name_to_id[marker_id],
+                    "threadName": thread["name"],
+                    "processName": thread.get("process_name", "unknown"),
+                    "time": row.get("startTime")
+                })
+
+    return pd.DataFrame(collected)
