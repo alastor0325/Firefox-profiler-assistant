@@ -5,10 +5,12 @@ dependencies = [
     "orjson",
     "pandas",
     "requests",
+    "google-generativeai",
+    "python-dotenv",
 ]
 
 [project.scripts]
-profiler-analysis = "profiler_assistant.main:main"
+profiler-assistant = "profiler_assistant.cli.run:main"
 
 [project.optional-dependencies]
 test = [

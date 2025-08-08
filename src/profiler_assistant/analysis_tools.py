@@ -142,10 +142,6 @@ def extract_markers_by_name(profile: Profile, marker_names: list[str]) -> pd.Dat
     """
     Extract all markers with names in the given list from all relevant threads.
 
-    Parameters:
-    profile (Profile): Parsed profiler data.
-    marker_names (list[str]): Marker names to look for.
-
     Returns:
     pd.DataFrame: DataFrame of matching markers with thread and process metadata.
     """
@@ -153,6 +149,10 @@ def extract_markers_by_name(profile: Profile, marker_names: list[str]) -> pd.Dat
         idx: name for idx, name in profile.string_table.items()
         if name in marker_names
     }
+
+    if not name_to_id:
+        # No matching marker names in string_table
+        return pd.DataFrame(columns=["markerName", "threadName", "processName", "time"])
 
     collected = []
 
@@ -167,8 +167,8 @@ def extract_markers_by_name(profile: Profile, marker_names: list[str]) -> pd.Dat
                 marker_id = row["name"]
                 collected.append({
                     "markerName": name_to_id[marker_id],
-                    "threadName": thread["name"],
-                    "processName": thread.get("process_name", "unknown"),
+                    "threadName": thread.get("name"),
+                    "processName": thread.get("process_name"),
                     "time": row.get("startTime")
                 })
 
