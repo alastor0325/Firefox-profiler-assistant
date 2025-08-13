@@ -101,10 +101,27 @@ src/
   profiler_assistant/
     rag/
       ingest.py                      # Markdown → JSONL chunker
+      embeddings.py                  # Embedding backends (Dummy, SentenceTransformers, swappable via env)
+      index.py                       # Vector index backends (NumpyIndex, optional FaissIndex)
 
 tests/
-  test_rag_ingest.py                 # validates example doc & ingestion
+  test_rag_ingest.py                  # validates example doc & ingestion
+  test_rag_embeddings.py              # validates embedding backends
+  test_rag_index.py                   # validates vector index backends
 ```
+
+### Backends
+
+We use a swappable backend design for both embedding generation and vector indexing:
+
+- **Embeddings**
+  - `DummyBackend` (default, deterministic, no deps — best for dev/CI)
+  - `SentenceTransformersBackend` (“all-MiniLM-L6-v2”) if `sentence-transformers` is installed
+  - Switch via `FPA_EMBEDDINGS` env var (`dummy` / `sentence-transformers`)
+
+- **Index**
+  - `NumpyIndex` (default, exact cosine search, no deps)
+  - `FaissIndex` (fast large-scale search if `faiss`/`faiss-cpu` is installed)
 
 ### Authoring rules
 - Start from `example_profiler_playbook.md` when creating a new doc.
@@ -115,13 +132,6 @@ tests/
   3. `## Analysis & Reasoning`
   4. `## Conclusion`
   5. `## References`
-
-### Validate locally
-Run:
-```bash
-pytest -q -k rag_ingest
-```
-This checks the example doc’s schema and ensures ingestion preserves metadata.
 
 ---
 

@@ -7,6 +7,7 @@ dependencies = [
     "requests",
     "google-generativeai",
     "python-dotenv",
+    "numpy>=1.24.0",
 ]
 
 [project.scripts]
@@ -16,6 +17,9 @@ profiler-assistant = "profiler_assistant.cli.run:main"
 test = [
     "pytest",
     "pytest-mock",
+]
+faiss = [
+    "faiss-cpu>=1.7.4",
 ]
 
 # This is the corrected section. It automatically finds all packages
