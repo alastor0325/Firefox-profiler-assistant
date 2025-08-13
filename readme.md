@@ -84,6 +84,47 @@ Then interact with the assistant:
 
 ---
 
+## RAG Knowledge Base
+
+We store investigation docs in `knowledge/raw/` as Markdown with YAML front-matter.
+These are ingested into JSONL chunks for later retrieval.
+
+### Folder layout
+```
+knowledge/
+  raw/
+    profiler/
+      example_profiler_playbook.md   # template & schema example (tests validate this)
+      bugXXX_ISSUE.md                # real investigation using the template
+
+src/
+  profiler_assistant/
+    rag/
+      ingest.py                      # Markdown → JSONL chunker
+
+tests/
+  test_rag_ingest.py                 # validates example doc & ingestion
+```
+
+### Authoring rules
+- Start from `example_profiler_playbook.md` when creating a new doc.
+- Keep **all** required front-matter keys (even if empty).
+- Use **five required sections**:
+  1. `# Summary`
+  2. `## Signals & Evidence`
+  3. `## Analysis & Reasoning`
+  4. `## Conclusion`
+  5. `## References`
+
+### Validate locally
+Run:
+```bash
+pytest -q -k rag_ingest
+```
+This checks the example doc’s schema and ensures ingestion preserves metadata.
+
+---
+
 ## 🧪 Development
 
 To set up for development:
