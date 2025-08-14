@@ -1,8 +1,33 @@
 import argparse
 import os
+
 from profiler_assistant.downloader import get_profile_from_url
 from profiler_assistant.parsing import load_and_parse_profile
 from profiler_assistant.agent.react_agent import run_react_agent
+from profiler_assistant.rag import pipeline as rag_pipeline
+from profiler_assistant.rag.config import load_rag_config, iter_candidate_files
+
+
+def refresh_rag_knowledge_index() -> None:
+    """
+    Refresh the RAG knowledge index from local project sources,
+    using the fixed config path 'config/rag.toml'.
+    Errors are printed (so they're visible) but do not crash the main flow.
+    """
+    try:
+        cfg = load_rag_config()  # fixed path: config/rag.toml
+        any_found = False
+        for file_path in iter_candidate_files(cfg):
+            any_found = True
+            rag_pipeline.build_all(file_path, domain="kb", index_dir=".fpa_index")
+        if not any_found:
+            print("[RAG] No knowledge files matched include/exclude patterns.")
+    except FileNotFoundError as e:
+        print(f"[RAG] Config error: {e}")
+    except Exception as e:
+        # Non-fatal: keep CLI usable even if RAG prep fails for other reasons
+        print(f"[RAG] Indexing failed: {e}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Firefox Profiler Assistant (LLM-powered CLI)")
@@ -21,7 +46,12 @@ def main():
             profile_path = get_profile_from_url(profile_path)
             is_temp_file = True
 
+        # Primary flow: parse profile first
         profile = load_and_parse_profile(profile_path)
+
+        # Then, best-effort (but visible) refresh of the KB index from fixed config
+        refresh_rag_knowledge_index()
+
         history = []
 
         print("🧠 Firefox Profiler Assistant (LLM CLI)\nType 'exit' to quit.\n")

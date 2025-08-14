@@ -11,6 +11,7 @@ An AI-powered command-line tool to analyze performance profiles from the Firefox
 - **Local File Support**: Analyzes `profile.json` files from your disk.
 - **Fast Parsing**: Uses `orjson` and `pandas` for high-performance profile handling.
 - **Tool-Based Architecture**: Modular tools for media/jank analysis and marker extraction.
+- **RAG Knowledge Base**: Ingests local Markdown playbooks, builds embeddings, and creates a small on-disk index that the agent can use for grounded answers.
 
 ---
 
@@ -35,6 +36,7 @@ source venv/bin/activate      # On Windows: venv\Scripts\activate
 ```bash
 pip install -e .
 ```
+> We support Python 3.8+. On Python < 3.11, the package `tomli` is used to read the TOML config.
 
 4. **Set up your Gemini API key:**
 
@@ -84,31 +86,40 @@ Then interact with the assistant:
 
 ---
 
-## RAG Knowledge Base
+## 📚 Retrieval-Augmented Generation (RAG)
 
-We store investigation docs in `knowledge/raw/` as Markdown with YAML front-matter.
-These are ingested into JSONL chunks for later retrieval.
+### How it works
+On startup, the CLI **automatically** looks for a TOML config at `config/rag.toml` and, if present, performs:
+1. **Ingest** — Markdown → JSONL chunks
+2. **Embeddings** — Encode chunk text with a pluggable embedding backend
+3. **Index** — Save lightweight artifacts for fast search
 
-### Folder layout
+These steps are handled by:
+- `profiler_assistant/rag/ingest.py`
+- `profiler_assistant/rag/embeddings.py`
+- `profiler_assistant/rag/index.py`
+- Orchestrated by `profiler_assistant/rag/pipeline.py`
+
+### Required config
+In `config/rag.toml`:
+```toml
+# Directories that contain knowledge files
+knowledge_roots = ["knowledge/raw/profiler"]
+
+# Which files to include (relative to each root). Supports ** recursion.
+include = ["**/*.md"]
+
+# Files to exclude (relative to each root). Add any noisy or example docs here.
+exclude = ["**/example_profiler_playbook.md"]
 ```
-knowledge/
-  raw/
-    profiler/
-      example_profiler_playbook.md   # template & schema example (tests validate this)
-      bugXXX_ISSUE.md                # real investigation using the template
+> If this file is missing or no files match, the CLI prints a message and continues without RAG.
 
-src/
-  profiler_assistant/
-    rag/
-      ingest.py                      # Markdown → JSONL chunker
-      embeddings.py                  # Embedding backends (Dummy, SentenceTransformers, swappable via env)
-      index.py                       # Vector index backends (NumpyIndex, optional FaissIndex)
+### Artifacts (generated)
+- `data/rag/chunks.jsonl` — ingested chunks (one JSON per line)
+- `data/rag/embeddings.npy` — NumPy array of embeddings for chunks
+- `.fpa_index/vectors.npy` and `.fpa_index/metas.jsonl` — lightweight “index” artifacts
 
-tests/
-  test_rag_ingest.py                  # validates example doc & ingestion
-  test_rag_embeddings.py              # validates embedding backends
-  test_rag_index.py                   # validates vector index backends
-```
+> These are derived and **should not be committed**.
 
 ### Backends
 
@@ -155,9 +166,14 @@ We use `pytest` for tests. To run them:
 pytest
 ```
 
-Test folders:
-- `tests/` — unit tests for core tools
-- `tests/test_agent/` — tests for the ReAct agent, Gemini client, and CLI logic
+---
+
+## 📝 Troubleshooting
+
+- **No RAG prints appear**: confirm `config/rag.toml` exists and that files match your `include`/`exclude` patterns.
+- **On Windows, excludes don’t seem to work**: we normalize paths and match both relative paths and basenames; use either `**/name.md` or just `name.md` in `exclude`.
+- **Using older Python**: `tomli` will be used automatically (declared as a dependency) for reading TOML on Python < 3.11.
+
 
 ---
 
@@ -166,6 +182,7 @@ Test folders:
 - Requires Python 3.8+
 - LLM agent uses `gemini-1.5-flash` (free-tier friendly)
 - `.env` is ignored by Git for API key safety
+- RAG artifacts are ephemeral and should be git‑ignored (`data/rag/`, `.fpa_index/`)
 
 ---
 
