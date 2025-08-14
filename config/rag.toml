@@ -1,6 +1,7 @@
 # Directories that contain knowledge files
 knowledge_roots = [
-  "knowledge/raw/profiler"
+  "knowledge/raw/profiler",
+  "knowledge/basic/classes"
 ]
 
 # Which files to include (relative to each root). Supports ** recursion.
@@ -10,5 +11,6 @@ include = [
 
 # Files to exclude (relative to each root). Add any noisy or example docs here.
 exclude = [
-    "example_profiler_playbook.md"
+    "example_profiler_playbook.md",
+    "example_class.md"
 ]

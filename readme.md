@@ -101,17 +101,8 @@ These steps are handled by:
 - Orchestrated by `profiler_assistant/rag/pipeline.py`
 
 ### Required config
-In `config/rag.toml`:
-```toml
-# Directories that contain knowledge files
-knowledge_roots = ["knowledge/raw/profiler"]
+In `config/rag.toml`, you can specify where the RAG knowledge sources should come from.
 
-# Which files to include (relative to each root). Supports ** recursion.
-include = ["**/*.md"]
-
-# Files to exclude (relative to each root). Add any noisy or example docs here.
-exclude = ["**/example_profiler_playbook.md"]
-```
 > If this file is missing or no files match, the CLI prints a message and continues without RAG.
 
 ### Artifacts (generated)
