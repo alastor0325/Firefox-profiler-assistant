@@ -1,56 +1,132 @@
-import json
-from profiler_assistant.agent.prompts import SYSTEM_PROMPT
-from profiler_assistant.agent.gemini_client import call_gemini_chat
-from profiler_assistant.tools.base import TOOLS
+"""
+React-agent wrapper and tool descriptors for the CLI.
 
-ALLOWED_TOOLS = set(TOOLS.keys())
+- describe_tools() -> str
+  Returns a compact, human-readable list of available tools:
+    - RAG tools with their request/response types (from router schemas)
+    - Domain tools discovered in profiler_assistant.tools (public callables)
 
-def describe_tools():
-    return "\n".join([
-        f"- {name}: {spec['description']} (args: {', '.join(spec['args'])})"
-        for name, spec in TOOLS.items()
-    ])
+- run_react_agent(profile, question, history) -> {"final": "..."} | {"error": "..."}
+  Bridges the existing CLI (run.py) to the ReAct loop. It bootstraps RAG
+  backends once, runs the agent, and appends a 'Sources:' line when citations exist.
+"""
+from __future__ import annotations
 
-def run_react_agent(profile, question, history):
-    # Step 1: Build prompt
-    system_prompt = SYSTEM_PROMPT.format(tool_list=describe_tools())
-    full_prompt = system_prompt + "\n\n"
-    for h in history:
-        full_prompt += f"{h['role'].capitalize()}: {h['content']}\n"
-    full_prompt += f"User: {question}\n"
+import logging
+import profiler_assistant.llm.call_model as _call_model_mod
+from typing import Any, Dict, List
+from profiler_assistant.app.bootstrap import init_rag_from_config
+from profiler_assistant.agent.react import run_react
+from profiler_assistant.runtime.context import set_current_profile
+from profiler_assistant.agent.tool_router import (
+    list_tools as _list_tools,
+    tool_schema as _tool_schema,
+)
 
-    # Step 2: Get first LLM response
-    response = call_gemini_chat(full_prompt)
+_RAG_BOOTSTRAPPED = False
 
-    if "Final Answer:" in response:
-        return {"final": response}
 
-    # Step 3: Try parsing Action and Action Input
+def _ensure_bootstrap() -> None:
+    """Idempotently register search/docs (and LLM summarizer if configured)."""
+    global _RAG_BOOTSTRAPPED
+    if not _RAG_BOOTSTRAPPED:
+        try:
+            init_rag_from_config()
+            _RAG_BOOTSTRAPPED = True
+        except Exception as e:
+            # Non-fatal: agent runs, but tools may return empty if no artifacts.
+            logging.warning("react_agent: bootstrap failed: %s", e)
+
+
+def describe_tools() -> str:
+    """
+    Return a compact string description of available tools.
+
+    RAG tool lines:
+      <name>: <RequestType> -> <ResponseType>
+
+    Followed by a "domain tools:" section listing public callables found in
+    profiler_assistant.tools and any of its submodules (best-effort).
+    """
+    rows: List[str] = []
+
+    # RAG tools (from router schemas)
     try:
-        tool_name = next(line for line in response.splitlines() if line.startswith("Action:")).split(":", 1)[1].strip().strip("`")
-        tool_input_json = next(line for line in response.splitlines() if line.startswith("Action Input:")).split(":", 1)[1].strip()
-        tool_input = json.loads(tool_input_json)
-    except Exception:
-        # No valid tool call → retry with reminder
-        full_prompt += "\nAssistant: Please follow the format using Action and Action Input.\n"
-        response = call_gemini_chat(full_prompt)
-        if "Final Answer:" in response:
-            return {"final": response}
-        return {"error": "⚠️ No tool call or Final Answer detected after retry."}
-
-    # Step 4: Validate tool and args
-    if tool_name not in ALLOWED_TOOLS:
-        return {"error": f"❌ Tool '{tool_name}' is not recognized or allowed."}
-
-    expected_args = set(TOOLS[tool_name]["args"])
-    if not set(tool_input.keys()).issubset(expected_args):
-        return {
-            "error": f"❌ Invalid arguments for tool '{tool_name}'. Expected: {expected_args}, got: {set(tool_input.keys())}"
-        }
-
-    # Step 5: Execute tool and return result
-    try:
-        result = TOOLS[tool_name]["function"](profile, **tool_input)
-        return {"tool_name": tool_name, "tool_result": result}
+        for name in sorted(_list_tools()):
+            schema = _tool_schema(name) or {}
+            req = str(schema.get("request_type", ""))
+            resp = str(schema.get("response_type", ""))
+            rows.append(f"{name}: {req} -> {resp}")
     except Exception as e:
-        return {"error": f"Tool execution failed: {type(e).__name__}: {e}"}
+        rows.append(f"[warn] failed to enumerate RAG tools: {e}")
+
+    # Domain tools (public callables in profiler_assistant.tools and its submodules)
+    try:
+        import importlib
+        import pkgutil
+        import profiler_assistant.tools as _domain_pkg  # type: ignore
+
+        discovered: set[str] = set()
+
+        # Collect from package namespace (__all__ preferred; else dir())
+        names = getattr(_domain_pkg, "__all__", None)
+        if not names:
+            names = [n for n in dir(_domain_pkg) if not n.startswith("_")]
+        for n in names:
+            obj = getattr(_domain_pkg, n, None)
+            if callable(obj):
+                discovered.add(n)
+
+        # If package has submodules, walk them and collect public callables
+        pkg_path = getattr(_domain_pkg, "__path__", None)
+        if pkg_path:
+            for modinfo in pkgutil.iter_modules(pkg_path):
+                subname = f"{_domain_pkg.__name__}.{modinfo.name}"
+                try:
+                    submod = importlib.import_module(subname)
+                except Exception:
+                    continue
+                for n in dir(submod):
+                    if n.startswith("_"):
+                        continue
+                    obj = getattr(submod, n, None)
+                    if callable(obj):
+                        discovered.add(n)
+
+        if discovered:
+            rows.append("")  # separator
+            rows.append("domain tools:")
+            for n in sorted(discovered):
+                rows.append(f"- {n}")
+    except Exception:
+        # Omit silently if module missing/unimportable in this env
+        pass
+
+    return "\n".join(rows)
+
+
+def run_react_agent(profile: Dict[str, Any], question: str, history: List[Dict[str, str]]) -> Dict[str, str]:
+    """
+    CLI entry wrapper used by run.py.
+    """
+    _ensure_bootstrap()
+
+    try:
+        # ✅ make the loaded profile visible to domain tools
+        set_current_profile(profile)
+
+        result = run_react(question, _call_model_mod.call_model, max_steps=6)
+        final_text = result.get("answer", "")
+        cits = result.get("citations") or []
+        if cits:
+            final_text = f"{final_text}\nSources: {', '.join(cits)}"
+        return {"final": final_text}
+    except ValueError as e:
+        msg = str(e)
+        if "GUARD_CITATION_REQUIRED" in msg:
+            return {"error": "GUARD_CITATION_REQUIRED"}
+        return {"error": f"GUARD: {msg}"}
+    except RuntimeError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"agent error: {e}"}
