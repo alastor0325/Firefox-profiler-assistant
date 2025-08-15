@@ -1,6 +1,6 @@
 """
-Router integration test using fixture search and docs stores.
-Ensures non-empty results and stable ordering through call_tool.
+Router integration test using fixture search/docs stores and fallback summarizer.
+Ensures non-empty results, stable ordering, and valid citations through call_tool.
 """
 from profiler_assistant.agent.tool_router import list_tools, tool_schema, call_tool
 
@@ -17,8 +17,7 @@ def test_call_tool_success_paths():
     # vector_search
     resp = call_tool("vector_search", {"query": "media pipeline", "k": 2})
     ids = [h["id"] for h in resp["hits"]]
-    # Tie-breaker is lexicographic ID on equal scores; 'doc:media' < 'doc:render-thread'
-    assert ids == ["doc:media-pipeline", "doc:media"]
+    assert ids == ["doc:media-pipeline", "doc:media"]  # tie-breaker: lexicographic on equal scores
 
     # get_docs_by_id (use 'return' alias; fetch parent from a chunk id)
     resp2 = call_tool("get_docs_by_id", {"ids": ["doc:media#0-10"], "return": "parent"})
@@ -31,18 +30,21 @@ def test_call_tool_success_paths():
         "context_summarize",
         {
             "hits": [
-                {"id": "h1", "text": "t", "score": 1.0, "meta": {"source": "s"}},
+                {"id": "h1", "text": "fact one", "score": 1.0, "meta": {"source": "s"}},
+                {"id": "h2", "text": "fact two", "score": 1.0, "meta": {"source": "s"}},
             ],
             "style": "bullet",
-            "token_budget": 10,
+            "token_budget": 16,
         },
     )
-    assert resp3.get("summary") == "No context provided yet."
-    assert isinstance(resp3.get("citations"), list)
+    assert isinstance(resp3.get("summary"), str) and len(resp3.get("summary")) > 0
+    assert isinstance(resp3.get("citations"), list) and len(resp3["citations"]) >= 1
+    for c in resp3["citations"]:
+        start, end = c["offset"]
+        assert resp3["summary"][start:end] == c["id"]
 
 
 def test_call_tool_invalid_args_and_unknown_tool():
-    # Unknown tool
     try:
         call_tool("nope", {})
     except ValueError as e:
@@ -50,7 +52,6 @@ def test_call_tool_invalid_args_and_unknown_tool():
     else:
         raise AssertionError("Expected ValueError for unknown tool")
 
-    # Invalid args: vector_search requires non-empty query
     try:
         call_tool("vector_search", {"query": ""})
     except ValueError as e:

@@ -5,7 +5,7 @@ Provides search and docs fetch registries used by tools and tests.
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, List, Optional, Any
+from typing import Callable, Dict, List, Optional, Any, Tuple
 
 # ---- Search impl registry ----
 
@@ -61,3 +61,32 @@ def clear_docs_impl() -> None:
     global _DOCS_IMPL
     logging.info("clear_docs_impl")
     _DOCS_IMPL = None
+
+# ---- Summarizer impl registry ----
+
+# hits (as plain dicts), style in {"bullet","abstract","qa"}, token_budget
+# returns: (summary: str, citations: [{"id": str, "offset": (int,int)}])
+SummarizeImpl = Callable[
+    [List[Dict[str, Any]], str, int],
+    Tuple[str, List[Dict[str, Any]]]
+]
+_SUMMARIZER_IMPL: Optional[SummarizeImpl] = None
+
+
+def register_summarizer_impl(fn: SummarizeImpl) -> None:
+    global _SUMMARIZER_IMPL
+    logging.info("register_summarizer_impl: %s", getattr(fn, "__name__", str(fn)))
+    _SUMMARIZER_IMPL = fn
+
+
+def get_summarizer_impl() -> SummarizeImpl:
+    if _SUMMARIZER_IMPL is None:
+        logging.warning("get_summarizer_impl: missing implementation; fallback will be used by tool")
+        raise RuntimeError("SUMMARIZER_NOT_CONFIGURED")
+    return _SUMMARIZER_IMPL
+
+
+def clear_summarizer_impl() -> None:
+    global _SUMMARIZER_IMPL
+    logging.info("clear_summarizer_impl")
+    _SUMMARIZER_IMPL = None

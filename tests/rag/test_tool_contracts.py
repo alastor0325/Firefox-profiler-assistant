@@ -1,6 +1,6 @@
 """
-Contract tests updated for vector_search (fixture returns hits) and get_docs_by_id
-(using the fixture docs store). Invalid-arg paths remain the same.
+Contract tests updated for vector_search/get_docs_by_id and context_summarize.
+Checks basic shape and citation offsets without relying on any external LLM.
 """
 from dataclasses import asdict
 
@@ -27,8 +27,7 @@ def test_vector_search_success_and_shape():
     assert isinstance(resp.hits, list)
     assert len(resp.hits) >= 2
     top_ids = [h.id for h in resp.hits[:2]]
-    # Tie-breaker is lexicographic ID on equal scores; 'doc:media' < 'doc:render-thread'
-    assert top_ids == ["doc:media-pipeline", "doc:media"]
+    assert top_ids == ["doc:media-pipeline", "doc:media"]  # tie-breaker by ID
 
 
 def test_vector_search_invalid_args():
@@ -55,8 +54,7 @@ def test_vector_search_invalid_args():
 
 
 def test_get_docs_by_id_success_and_shape():
-    req = GetDocsByIdRequest(ids=["doc:media#0-10"], return_="parent")
-    resp = get_docs_by_id(req)
+    resp = get_docs_by_id(GetDocsByIdRequest(ids=["doc:media#0-10"], return_="parent"))
     assert isinstance(resp.docs, list)
     assert len(resp.docs) == 1
     assert resp.docs[0].id == "doc:media"
@@ -79,15 +77,14 @@ def test_get_docs_by_id_invalid_args():
         raise AssertionError("Expected ValueError for blank id")
 
 
-def test_context_summarize_success_and_shape():
+def test_context_summarize_success_and_offsets():
     hit_meta: Metadata = {"source": "s"}
-    hits = [VectorSearchHit(id="h1", text="t", score=1.0, meta=hit_meta)]
-    req = ContextSummarizeRequest(hits=hits, style="bullet", token_budget=100)
-    resp = context_summarize(req)
-    assert isinstance(resp.summary, str)
-    assert resp.summary == "No context provided yet."
-    assert isinstance(resp.citations, list)
-    assert len(resp.citations) == 0
+    hits = [VectorSearchHit(id="h1", text="some fact", score=1.0, meta=hit_meta)]
+    res = context_summarize(ContextSummarizeRequest(hits=hits, style="bullet", token_budget=24))
+    assert isinstance(res.summary, str) and len(res.summary) > 0
+    assert len(res.citations) >= 1
+    for c in res.citations:
+        assert res.summary[c.offset[0]:c.offset[1]] == c.id
 
 
 def test_context_summarize_invalid_args():
