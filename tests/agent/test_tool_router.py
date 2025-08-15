@@ -1,8 +1,6 @@
 """
-Validates router integration with stub implementations:
-- tools are listed and schema is reported
-- call_tool dispatches successfully and returns dict responses
-- invalid/unknown tool cases are surfaced as ValueError
+Router integration test with the fixture index registered by conftest.
+Ensures non-empty results and stable ordering through call_tool.
 """
 from profiler_assistant.agent.tool_router import (
     list_tools,
@@ -22,7 +20,9 @@ def test_list_tools_and_schema():
 def test_call_tool_success_paths():
     # vector_search
     resp = call_tool("vector_search", {"query": "media pipeline", "k": 2})
-    assert "hits" in resp and isinstance(resp["hits"], list) and len(resp["hits"]) == 0
+    ids = [h["id"] for h in resp["hits"]]
+    # Tie-breaker is lexicographic ID on equal scores; 'doc:media' < 'doc:render-thread'
+    assert ids == ["doc:media-pipeline", "doc:media"]
 
     # get_docs_by_id (allow 'return' alias)
     resp2 = call_tool("get_docs_by_id", {"ids": ["doc:1"], "return": "chunk"})

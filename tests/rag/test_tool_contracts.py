@@ -1,23 +1,35 @@
 """
-Validates stub behaviors: argument validation and deterministic empty results.
-Tests call the tool functions directly (not through the router).
+Contract tests updated to expect non-empty results from the fixture index.
+Invalid-arg paths remain the same.
 """
+from dataclasses import asdict
+
 from profiler_assistant.rag.types import (
     Metadata,
     VectorSearchRequest,
-    GetDocsByIdRequest,
-    ContextSummarizeRequest,
     VectorSearchHit,
+    VectorSearchResponse,
+    GetDocsByIdRequest,
+    GetDocsByIdResponse,
+    Doc,
+    ContextSummarizeRequest,
+    ContextSummarizeResponse,
+    Citation,
 )
 from profiler_assistant.rag.tools.vector_search import vector_search
 from profiler_assistant.rag.tools.get_docs_by_id import get_docs_by_id
 from profiler_assistant.rag.tools.context_summarize import context_summarize
 
+
 def test_vector_search_success_and_shape():
-    req = VectorSearchRequest(query="rendering pipeline", k=3, section_hard_limit=512)
+    req = VectorSearchRequest(query="media pipeline", k=3, section_hard_limit=512)
     resp = vector_search(req)
     assert isinstance(resp.hits, list)
-    assert len(resp.hits) == 0
+    assert len(resp.hits) >= 2
+    # Deterministic top-2 IDs based on fixture corpus and score rules
+    top_ids = [h.id for h in resp.hits[:2]]
+    # Tie-breaker is lexicographic ID on equal scores; 'doc:media' < 'doc:render-thread'
+    assert top_ids == ["doc:media-pipeline", "doc:media"]
 
 
 def test_vector_search_invalid_args():
