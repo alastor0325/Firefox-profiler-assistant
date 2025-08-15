@@ -1,6 +1,6 @@
 """
-Contract tests updated to expect non-empty results from the fixture index.
-Invalid-arg paths remain the same.
+Contract tests updated for vector_search (fixture returns hits) and get_docs_by_id
+(using the fixture docs store). Invalid-arg paths remain the same.
 """
 from dataclasses import asdict
 
@@ -26,14 +26,12 @@ def test_vector_search_success_and_shape():
     resp = vector_search(req)
     assert isinstance(resp.hits, list)
     assert len(resp.hits) >= 2
-    # Deterministic top-2 IDs based on fixture corpus and score rules
     top_ids = [h.id for h in resp.hits[:2]]
     # Tie-breaker is lexicographic ID on equal scores; 'doc:media' < 'doc:render-thread'
     assert top_ids == ["doc:media-pipeline", "doc:media"]
 
 
 def test_vector_search_invalid_args():
-    # Empty query
     try:
         vector_search(VectorSearchRequest(query=""))
     except ValueError as e:
@@ -41,7 +39,6 @@ def test_vector_search_invalid_args():
     else:
         raise AssertionError("Expected ValueError for empty query")
 
-    # Non-positive k
     try:
         vector_search(VectorSearchRequest(query="ok", k=0))
     except ValueError as e:
@@ -49,7 +46,6 @@ def test_vector_search_invalid_args():
     else:
         raise AssertionError("Expected ValueError for k <= 0")
 
-    # Negative section_hard_limit
     try:
         vector_search(VectorSearchRequest(query="ok", section_hard_limit=-1))
     except ValueError as e:
@@ -59,14 +55,15 @@ def test_vector_search_invalid_args():
 
 
 def test_get_docs_by_id_success_and_shape():
-    req = GetDocsByIdRequest(ids=["doc:1"], return_="chunk")
+    req = GetDocsByIdRequest(ids=["doc:media#0-10"], return_="parent")
     resp = get_docs_by_id(req)
     assert isinstance(resp.docs, list)
-    assert len(resp.docs) == 0
+    assert len(resp.docs) == 1
+    assert resp.docs[0].id == "doc:media"
+    assert resp.docs[0].meta.get("title") == "Media"
 
 
 def test_get_docs_by_id_invalid_args():
-    # Empty list
     try:
         get_docs_by_id(GetDocsByIdRequest(ids=[]))
     except ValueError as e:
@@ -74,7 +71,6 @@ def test_get_docs_by_id_invalid_args():
     else:
         raise AssertionError("Expected ValueError for empty ids")
 
-    # Bad entry
     try:
         get_docs_by_id(GetDocsByIdRequest(ids=["", "doc:2"]))
     except ValueError as e:
@@ -95,7 +91,6 @@ def test_context_summarize_success_and_shape():
 
 
 def test_context_summarize_invalid_args():
-    # Negative budget
     hit_meta: Metadata = {"source": "s"}
     hits = [VectorSearchHit(id="h1", text="t", score=1.0, meta=hit_meta)]
     try:

@@ -1,12 +1,8 @@
 """
-Router integration test with the fixture index registered by conftest.
+Router integration test using fixture search and docs stores.
 Ensures non-empty results and stable ordering through call_tool.
 """
-from profiler_assistant.agent.tool_router import (
-    list_tools,
-    tool_schema,
-    call_tool,
-)
+from profiler_assistant.agent.tool_router import list_tools, tool_schema, call_tool
 
 
 def test_list_tools_and_schema():
@@ -24,21 +20,18 @@ def test_call_tool_success_paths():
     # Tie-breaker is lexicographic ID on equal scores; 'doc:media' < 'doc:render-thread'
     assert ids == ["doc:media-pipeline", "doc:media"]
 
-    # get_docs_by_id (allow 'return' alias)
-    resp2 = call_tool("get_docs_by_id", {"ids": ["doc:1"], "return": "chunk"})
-    assert "docs" in resp2 and isinstance(resp2["docs"], list) and len(resp2["docs"]) == 0
+    # get_docs_by_id (use 'return' alias; fetch parent from a chunk id)
+    resp2 = call_tool("get_docs_by_id", {"ids": ["doc:media#0-10"], "return": "parent"})
+    assert "docs" in resp2 and isinstance(resp2["docs"], list) and len(resp2["docs"]) == 1
+    assert resp2["docs"][0]["id"] == "doc:media"
+    assert resp2["docs"][0]["meta"].get("title") == "Media"
 
     # context_summarize
     resp3 = call_tool(
         "context_summarize",
         {
             "hits": [
-                {
-                    "id": "h1",
-                    "text": "t",
-                    "score": 1.0,
-                    "meta": {"source": "s"},
-                }
+                {"id": "h1", "text": "t", "score": 1.0, "meta": {"source": "s"}},
             ],
             "style": "bullet",
             "token_budget": 10,
