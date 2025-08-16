@@ -1,11 +1,19 @@
+"""
+    CLI entry for Firefox Profiler Assistant (LLM-powered). Parses arguments,
+    drives the interactive loop, and now supports --log-level to control verbosity.
+"""
+
 import argparse
 import os
+import logging
+from typing import List, Optional
 
 from profiler_assistant.downloader import get_profile_from_url
 from profiler_assistant.parsing import load_and_parse_profile
 from profiler_assistant.agent.react_agent import run_react_agent
 from profiler_assistant.rag import pipeline as rag_pipeline
 from profiler_assistant.rag.config import load_rag_config, iter_candidate_files
+from profiler_assistant.logging_config import configure_logging, LEVEL_MAP
 
 
 def refresh_rag_knowledge_index() -> None:
@@ -29,14 +37,33 @@ def refresh_rag_knowledge_index() -> None:
         print(f"[RAG] Indexing failed: {e}")
 
 
-def main():
+def get_parser() -> argparse.ArgumentParser:
+    """
+    Return the argparse parser. Split out for testability and reuse.
+    """
     parser = argparse.ArgumentParser(description="Firefox Profiler Assistant (LLM-powered CLI)")
     parser.add_argument(
         "profile_source",
         type=str,
         help="Path to local profile.json OR a Firefox Profiler share URL"
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--log-level",
+        choices=list(LEVEL_MAP.keys()),
+        default="WARNING",
+        help="Set logging level (default: WARNING).",
+   )
+    return parser
+
+
+def main(argv: Optional[List[str]] = None):
+    parser = get_parser()
+    args = parser.parse_args(argv)
+
+    # Configure logging as early as possible
+    configure_logging(args.log_level)
+    logger = logging.getLogger(__name__)
+    logger.debug("CLI args parsed: %s", vars(args))
 
     profile_path = args.profile_source
     is_temp_file = False
