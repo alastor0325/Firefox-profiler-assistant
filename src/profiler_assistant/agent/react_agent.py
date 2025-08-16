@@ -19,7 +19,8 @@ from profiler_assistant.app.bootstrap import init_rag_from_config
 from profiler_assistant.agent.react import run_react
 from profiler_assistant.runtime.context import set_current_profile
 from profiler_assistant.agent.tool_router import (
-    list_tools as _list_tools,
+    list_rag_tools as _list_rag_tools,
+    list_domain_tools as _list_domain_tools,
     tool_schema as _tool_schema,
 )
 
@@ -52,7 +53,7 @@ def describe_tools() -> str:
 
     # RAG tools (from router schemas)
     try:
-        for name in sorted(_list_tools()):
+        for name in sorted(_list_rag_tools()):
             schema = _tool_schema(name) or {}
             req = str(schema.get("request_type", ""))
             resp = str(schema.get("response_type", ""))
@@ -60,46 +61,15 @@ def describe_tools() -> str:
     except Exception as e:
         rows.append(f"[warn] failed to enumerate RAG tools: {e}")
 
-    # Domain tools (public callables in profiler_assistant.tools and its submodules)
+    # Domain tools (from router; avoids fragile import scanning)
     try:
-        import importlib
-        import pkgutil
-        import profiler_assistant.tools as _domain_pkg  # type: ignore
-
-        discovered: set[str] = set()
-
-        # Collect from package namespace (__all__ preferred; else dir())
-        names = getattr(_domain_pkg, "__all__", None)
-        if not names:
-            names = [n for n in dir(_domain_pkg) if not n.startswith("_")]
-        for n in names:
-            obj = getattr(_domain_pkg, n, None)
-            if callable(obj):
-                discovered.add(n)
-
-        # If package has submodules, walk them and collect public callables
-        pkg_path = getattr(_domain_pkg, "__path__", None)
-        if pkg_path:
-            for modinfo in pkgutil.iter_modules(pkg_path):
-                subname = f"{_domain_pkg.__name__}.{modinfo.name}"
-                try:
-                    submod = importlib.import_module(subname)
-                except Exception:
-                    continue
-                for n in dir(submod):
-                    if n.startswith("_"):
-                        continue
-                    obj = getattr(submod, n, None)
-                    if callable(obj):
-                        discovered.add(n)
-
-        if discovered:
-            rows.append("")  # separator
+        domain_names = sorted(_list_domain_tools())
+        if domain_names:
+            rows.append("")
             rows.append("domain tools:")
-            for n in sorted(discovered):
+            for n in domain_names:
                 rows.append(f"- {n}")
     except Exception:
-        # Omit silently if module missing/unimportable in this env
         pass
 
     return "\n".join(rows)

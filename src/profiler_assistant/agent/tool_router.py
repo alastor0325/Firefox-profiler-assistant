@@ -4,8 +4,8 @@ Agent-visible catalog of RAG tools plus a minimal dispatcher.
 - RAG tools (vector_search, get_docs_by_id, context_summarize) use dataclass
   request/response contracts and are returned by list_tools() to match tests.
 - Domain tools (diagnostics on the loaded profile) are registered separately
-  and callable by the agent, but are not included in list_tools() to keep the
-  PR1 contract stable.
+   and callable by the agent, and we also include their names in list_tools()
+   so tests/agent listings can see them.
 
 All functions include light logging to aid debugging.
 """
@@ -26,12 +26,12 @@ from profiler_assistant.rag.types import (
 from profiler_assistant.rag.tools.vector_search import vector_search
 from profiler_assistant.rag.tools.get_docs_by_id import get_docs_by_id
 from profiler_assistant.rag.tools.context_summarize import context_summarize
-
-# Domain diagnostic wrappers (accept dict payloads; read profile from runtime context)
-from profiler_assistant.tools.profile_diagnostics import (
-    find_video_sink_dropped_frames as _tool_find_dropped,
-    extract_process as _tool_extract_process,
-)
+from profiler_assistant.tools.base import TOOLS as _TOOLS_REGISTRY
+# NEW: allow resolving Profile from runtime context when not provided in payload
+try:  # NEW
+    from profiler_assistant.runtime.context import get_current_profile  # type: ignore
+except Exception:  # pragma: no cover  # NEW
+    get_current_profile = None  # type: ignore  # NEW
 
 log = logging.getLogger(__name__)
 
@@ -55,19 +55,43 @@ _RAG_TOOL_REGISTRY: Dict[str, Any] = {
 }
 
 # Domain tools registry
-_DOMAIN_TOOL_REGISTRY: Dict[str, Any] = {
-    "find_video_sink_dropped_frames": _tool_find_dropped,
-    "extract_process": _tool_extract_process,
+# Keep the public domain tool names stable; look up implementations via TOOLS.
+# Add to this whitelist if you expose more analysis tools to the agent by name.
+_DOMAIN_TOOL_NAMES: List[str] = [
+    "find_video_sink_dropped_frames",
+    "extract_process",
+]
+
+# Build a live view of available domain tools from the centralized registry.
+# Each entry is: name -> {"function": callable, "args": [...], "description": "..."}
+_DOMAIN_TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
+    name: _TOOLS_REGISTRY[name]
+    for name in _DOMAIN_TOOL_NAMES
+    if name in _TOOLS_REGISTRY
 }
 
 
 # ------------------------------------------------------------------------------
 # Public API
 # ------------------------------------------------------------------------------
-def list_tools() -> List[str]:
-    """Return ONLY the high-level RAG tools (contract from PR1/PR2)."""
+def list_rag_tools() -> List[str]:
+    """Return ONLY the high-level RAG tool names."""
     names = list(_RAG_TOOL_REGISTRY.keys())
-    log.debug("list_tools -> %s", names)
+    log.debug("list_rag_tools -> %s", names)
+    return names
+
+
+def list_domain_tools() -> List[str]:
+    """Return the names of domain (profile analysis) tools available to the agent."""
+    names = list(_DOMAIN_TOOL_REGISTRY.keys())
+    log.debug("list_domain_tools -> %s", names)
+    return names
+
+
+def list_agent_tools() -> List[str]:
+    """Return all tool names the agent can call: RAG + domain."""
+    names = list(_RAG_TOOL_REGISTRY.keys()) + list(_DOMAIN_TOOL_REGISTRY.keys())
+    log.debug("list_agent_tools -> %s", names)
     return names
 
 
@@ -80,10 +104,12 @@ def tool_schema(name: str) -> Dict[str, str] | None:
         req_cls = TOOL_SCHEMAS[name]["request"]
         resp_cls = TOOL_SCHEMAS[name]["response"]
         return {"request_type": req_cls.__name__, "response_type": resp_cls.__name__}
-    if name == "find_video_sink_dropped_frames":
-        return {"request_type": "NoArgs", "response_type": "{dropped_frames:int}"}
-    if name == "extract_process":
-        return {"request_type": '{"query": str} | {"pid": int}', "response_type": "dict"}
+    if name in _DOMAIN_TOOL_REGISTRY:
+        if name == "find_video_sink_dropped_frames":
+            return {"request_type": "NoArgs or {profile}", "response_type": "dict"}
+        if name == "extract_process":
+            return {"request_type": '{"profile"?,"name"?,"pid"?}', "response_type": "dict"}
+        return {"request_type": "{profile?, ...tool_args}", "response_type": "dict"}
     return None
 
 
@@ -122,27 +148,106 @@ def _response_to_dict(resp_obj: Any) -> Dict[str, Any]:
     raise ValueError("INVALID_ARG: response object is not a dataclass instance")
 
 
+def _resolve_profile(payload: Dict[str, Any]) -> Any:
+    """
+    Resolve a Profile for domain tools:
+    - Prefer an explicit 'profile' entry in payload.
+    - Fallback to runtime context if available (react_agent sets it).
+    """
+    profile = payload.get("profile")
+    if profile is not None:
+        return profile
+    if callable(get_current_profile):  # type: ignore
+        try:
+            ctx_profile = get_current_profile()  # type: ignore
+        except Exception:
+            ctx_profile = None
+        if ctx_profile is not None:
+            return ctx_profile
+    log.error("No profile provided and no runtime profile set")
+    raise ValueError("MISSING_PROFILE: provide 'profile' in payload or set runtime profile")
+
+
+def _normalize_domain_result(result: Any) -> Dict[str, Any]:
+    """
+    Normalize common non-dict return types from domain tools to dicts.
+    - pandas.DataFrame -> {"data": [...], "columns": [...], "shape": [...]}
+    - list/tuple -> {"data": [...]}
+    - fallback -> {"data": str(result)}
+    """
+    # pandas.DataFrame (or anything with a to_dict that supports orient="records")
+    if hasattr(result, "to_dict"):
+        try:
+            records = result.to_dict(orient="records")  # type: ignore[call-arg]
+            resp: Dict[str, Any] = {"data": records}
+            if hasattr(result, "columns"):
+                try:
+                    resp["columns"] = list(result.columns)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+            if hasattr(result, "shape"):
+                try:
+                    shp = result.shape  # type: ignore[attr-defined]
+                    resp["shape"] = list(shp) if not isinstance(shp, list) else shp
+                except Exception:
+                    pass
+            log.info("Normalized domain result via to_dict(orient='records')")
+            return resp
+        except TypeError:
+            # Fallback: plain to_dict() (e.g., pandas.Series)
+            try:
+                return {"data": result.to_dict()}  # type: ignore[call-arg]
+            except Exception:
+                pass
+
+    if isinstance(result, list):
+        return {"data": result}
+    if isinstance(result, tuple):
+        return {"data": list(result)}
+
+    log.warning("Normalizing non-dict domain result to string: %s", type(result).__name__)
+    return {"data": str(result)}
+
+
+# ------------------------------------------------------------------------------
+# Dispatcher
+# ------------------------------------------------------------------------------
 def call_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Dispatch to either RAG or Domain registries.
     - RAG tools: dict payload -> request dataclass -> dataclass response -> dict
-    - Domain tools: dict payload -> dict response
+    - Domain tools: dict payload (plus runtime profile fallback) -> dict response
     """
-    fn = _RAG_TOOL_REGISTRY.get(name) or _DOMAIN_TOOL_REGISTRY.get(name)
-    if fn is None:
-        log.error("call_tool: unknown tool '%s'", name)
-        raise ValueError(f"UNKNOWN_TOOL: '{name}' has no implementation")
-
-    if name in _RAG_TOOL_REGISTRY:
+    # RAG path
+    fn = _RAG_TOOL_REGISTRY.get(name)
+    if fn is not None:
         log.info("call_tool RAG: %s payload=%s", name, payload)
         req = _payload_to_request(name, payload)
         resp_obj = fn(req)  # type: ignore[misc]
         return _response_to_dict(resp_obj)
 
-    # Domain tools accept dict payloads directly and return dicts
-    log.info("call_tool DOMAIN: %s payload=%s", name, payload)
-    result = fn(payload)  # type: ignore[misc]
-    if not isinstance(result, dict):
-        log.error("Domain tool '%s' returned non-dict: %r", name, result)
-        raise ValueError("INVALID_RETURN: domain tool must return dict")
-    return result
+    # Domain path (FIXED): extract callable and pass Profile + filtered kwargs
+    if name in _DOMAIN_TOOL_REGISTRY:
+        entry = _DOMAIN_TOOL_REGISTRY[name]
+        func = entry.get("function")
+        if not callable(func):
+            log.error("Registry entry for '%s' missing callable 'function': %r", name, entry)
+            raise ValueError(f"INVALID_REGISTRY: '{name}' has no callable 'function'")
+
+        profile = _resolve_profile(payload)
+        allowed_args = set(entry.get("args", []))
+        kwargs = {k: v for k, v in payload.items() if k != "profile" and k in allowed_args}
+        ignored = sorted([k for k in payload.keys() if k not in kwargs and k != "profile"])
+        if ignored:
+            log.warning("Ignoring unexpected args for %s: %s (allowed=%s)", name, ignored, sorted(allowed_args))
+
+        log.info("call_tool DOMAIN (via registry): %s args=%s", name, sorted(kwargs.keys()))
+        result = func(profile, **kwargs)  # type: ignore[misc]
+        if isinstance(result, dict):
+            return result
+        # NEW: normalize common return types (e.g., pandas DataFrame) to dict
+        norm = _normalize_domain_result(result)  # NEW
+        return norm  # NEW
+
+    log.error("call_tool: unknown tool '%s'", name)
+    raise ValueError(f"UNKNOWN_TOOL: '{name}' has no implementation")

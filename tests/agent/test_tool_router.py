@@ -2,8 +2,7 @@
 Router integration test using fixture search/docs stores and fallback summarizer.
 Ensures non-empty results, stable ordering, and valid citations through call_tool.
 """
-from profiler_assistant.agent.tool_router import list_tools, tool_schema, call_tool
-
+from profiler_assistant.agent.tool_router import list_rag_tools as list_tools, tool_schema, call_tool
 
 def test_list_tools_and_schema():
     names = list_tools()
