@@ -7,8 +7,10 @@ dependencies = [
     "requests",
     "google-generativeai",
     "python-dotenv",
+    "sentence-transformers>=2.2.0",
     "numpy>=1.24.0",
     "tomli>=2.0.1",
+    "torch>=2.0.0",
 ]
 
 [project.scripts]

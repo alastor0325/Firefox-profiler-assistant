@@ -1,10 +1,8 @@
 """
-embeddings.py
--------------
 Purpose: Define a lightweight, swappable embedding interface for the RAG stack.
 - EmbeddingBackend protocol with encode().
-- Default DummyBackend (deterministic, dependency-free for tests/CI).
-- Optional SentenceTransformersBackend ("all-MiniLM-L6-v2") if installed.
+- Default SentenceTransformersBackend ("sentence-transformers/all-MiniLM-L6-v2") if installed.
+- Optional DummyBackend (deterministic, dependency-free for tests/CI) via env.
 - Selection via env var FPA_EMBEDDINGS (e.g., 'dummy', 'sentence-transformers').
 """
 
@@ -13,6 +11,9 @@ import hashlib
 import os
 from typing import List, Protocol, Optional
 import numpy as np
+
+# Default Hugging Face SentenceTransformers model for local embeddings
+DEFAULT_ST_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 class EmbeddingBackend(Protocol):
     def encode(self, texts: List[str]) -> np.ndarray: ...
@@ -37,26 +38,34 @@ class DummyBackend:
         return np.vstack(vecs)
 
 class SentenceTransformersBackend:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", device: Optional[str] = None):
+    def __init__(self, model_name: str = DEFAULT_ST_MODEL, device: Optional[str] = None):
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore
         except Exception as e:  # pragma: no cover
             raise RuntimeError("sentence-transformers not available") from e
-        self.model = SentenceTransformer(model_name, device=device)
+        if device is not None:
+            self.model = SentenceTransformer(model_name, device=device)
+        else:
+            self.model = SentenceTransformer(model_name)
 
     def encode(self, texts: List[str]) -> np.ndarray:  # pragma: no cover (heavy)
         emb = self.model.encode(texts, normalize_embeddings=True, convert_to_numpy=True)
         return emb.astype(np.float32)
 
 def get_backend() -> EmbeddingBackend:
-    kind = os.getenv("FPA_EMBEDDINGS", "dummy").lower()
+    import logging
+    logger = logging.getLogger(__name__)
+
+    kind = os.getenv("FPA_EMBEDDINGS", "sentence-transformers").lower()
     if kind in ("dummy", "test"):
+        logger.info("embedding_backend=dummy")
         return DummyBackend()
     if kind in ("sentence-transformers", "st", "minilm"):
         try:
-            return SentenceTransformersBackend("all-MiniLM-L6-v2")
+            logger.info("embedding_backend=local model=%s", DEFAULT_ST_MODEL)
+            return SentenceTransformersBackend(DEFAULT_ST_MODEL)
         except RuntimeError:
-            # Fallback to dummy if ST isn’t installed (keeps CI green)
+            logger.warning("sentence-transformers not available; falling back to dummy")
             return DummyBackend()
-    # Future: openai, gemini, onnx
+    logger.info("embedding_backend=unknown -> fallback dummy")
     return DummyBackend()
