@@ -226,7 +226,7 @@ def call_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         resp_obj = fn(req)  # type: ignore[misc]
         return _response_to_dict(resp_obj)
 
-    # Domain path (FIXED): extract callable and pass Profile + filtered kwargs
+    # Domain path
     if name in _DOMAIN_TOOL_REGISTRY:
         entry = _DOMAIN_TOOL_REGISTRY[name]
         func = entry.get("function")
@@ -235,19 +235,81 @@ def call_tool(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"INVALID_REGISTRY: '{name}' has no callable 'function'")
 
         profile = _resolve_profile(payload)
-        allowed_args = set(entry.get("args", []))
+
+        # Always log entry for debugging
+        log.info("call_tool DOMAIN entry: tool=%s payload=%s", name, payload)
+
+        # --- extract_process visibility + alias BEFORE filtering ---
+        if name == "extract_process":
+            raw_keys = sorted(k for k in payload.keys() if k != "profile")
+            log.info("extract_process raw payload keys=%s", raw_keys)
+
+            if "name" not in payload and "pid" not in payload:
+                q = payload.get("query")
+                q_preview = (str(q)[:200] + "…") if isinstance(q, str) and len(q or "") > 200 else q
+                log.warning("extract_process invoked without 'name'/'pid'. query_preview=%r", q_preview)
+
+            if "query" in payload and "name" not in payload and "pid" not in payload:
+                payload = dict(payload)  # avoid mutating caller's dict
+                alias_val = payload.pop("query")
+                payload["name"] = alias_val
+                log.info("tool_router: Mapped 'query' -> 'name' for extract_process: %r", alias_val)
+
+            if "name" not in payload and "pid" not in payload:
+                log.error("extract_process missing identifiers; refusing dispatch")
+                return {
+                    "error": "MISSING_IDENTIFIER",
+                    "hint": "Provide 'name' (string) or 'pid' (int) when calling extract_process.",
+                    "examples": [
+                        {"tool": "extract_process", "args": {"name": "Content Process"}},
+                        {"tool": "extract_process", "args": {"pid": 1234}},
+                    ],
+                }
+        # -----------------------------------------------------------
+
+        # Robust arg filtering (args may be None)
+        allowed_args = set(entry.get("args") or [])
         kwargs = {k: v for k, v in payload.items() if k != "profile" and k in allowed_args}
-        ignored = sorted([k for k in payload.keys() if k not in kwargs and k != "profile"])
+
+        # Compute ignored; never count or display 'query' for extract_process
+        ignored = sorted([
+            k for k in payload.keys()
+            if k not in kwargs and k != "profile"
+            and not (name == "extract_process" and k == "query")
+        ])
         if ignored:
-            log.warning("Ignoring unexpected args for %s: %s (allowed=%s)", name, ignored, sorted(allowed_args))
+            # Hide 'query' from the displayed allowed list for extract_process to avoid false positives
+            display_allowed = sorted(
+                allowed_args if name != "extract_process" else (allowed_args - {"query"})
+            )
+            log.warning(
+                "Ignoring unexpected args for %s: %s (allowed=%s)",
+                name, ignored, display_allowed
+            )
 
         log.info("call_tool DOMAIN (via registry): %s args=%s", name, sorted(kwargs.keys()))
+
+        # Call the tool
         result = func(profile, **kwargs)  # type: ignore[misc]
         if isinstance(result, dict):
             return result
-        # NEW: normalize common return types (e.g., pandas DataFrame) to dict
-        norm = _normalize_domain_result(result)  # NEW
-        return norm  # NEW
 
+        # Normalize pandas.DataFrame -> dict with keys expected by tests
+        try:
+            import pandas as pd  # type: ignore
+            if isinstance(result, pd.DataFrame):
+                return {
+                    "data": result.to_dict(orient="records"),   # <-- test expects 'data'
+                    "columns": list(result.columns),
+                    "shape": result.shape,                       # tuple (rows, cols); test uses shape[0]
+                }
+        except Exception:
+            # If pandas not available or other issue, fall through to string fallback
+            pass
+
+        # Fallback: stringify unknown types so we always return a dict (never None)
+        return {"result": str(result)}
+
+    # Unknown tool -> tests expect ValueError
     log.error("call_tool: unknown tool '%s'", name)
     raise ValueError(f"UNKNOWN_TOOL: '{name}' has no implementation")
