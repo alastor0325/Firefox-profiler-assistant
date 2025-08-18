@@ -12,7 +12,12 @@ from typing import Optional, List, Dict, Any
 import importlib
 import json
 import time
-
+from profiler_assistant.rag.manifest import (
+    EmbedderInfo,
+    write_index_manifest,
+    assert_index_compatible,
+    IndexCompatibilityError,
+)
 
 @dataclass
 class BuildOutputs:
@@ -47,6 +52,29 @@ def _save_metas_jsonl(metas: List[Dict[str, Any]], out_path: Path) -> None:
     with out_path.open("w", encoding="utf-8") as f:
         for m in metas:
             f.write(json.dumps(m, ensure_ascii=False) + "\n")
+
+
+def _get_embedder_info(backend, vectors_shape: Optional[tuple[int, int]] = None) -> Dict[str, Any]:
+    """
+    Purpose:
+    Surface a stable embedder identity for manifest checks.
+    """
+    info = {}
+    if hasattr(backend, "get_embedder_info"):
+        try:
+            info = backend.get_embedder_info() or {}
+        except Exception:
+            info = {}
+    # Fallbacks (minimal assumptions)
+    if not info:
+        name = type(backend).__name__
+        dim = int(vectors_shape[1]) if vectors_shape and len(vectors_shape) == 2 else 0
+        info = {"name": name, "dim": dim, "normalize": True}
+    # Ensure required keys exist
+    info.setdefault("name", type(backend).__name__)
+    info.setdefault("dim", int(vectors_shape[1]) if vectors_shape else 0)
+    info.setdefault("normalize", True)
+    return info
 
 
 def build_all(
@@ -110,6 +138,7 @@ def build_all(
         emb.parent.mkdir(parents=True, exist_ok=True)
         np.save(emb, vectors.astype(np.float32))
         print(f"[RAG] Embeddings: wrote {emb} shape={vectors.shape}")
+        embedder_info = _get_embedder_info(backend, vectors.shape)
         # If we’re going to build a local index, prepare metas now
         prepared_metas: Optional[List[Dict[str, Any]]] = []
         for r in rows:
@@ -127,6 +156,7 @@ def build_all(
         # Test fake shape
         emb.parent.mkdir(parents=True, exist_ok=True)
         emb_mod.run(str(jsonl), model=model, out_path=str(emb))
+        embedder_info = {"name": "unknown", "dim": 0, "normalize": True}  # minimal placeholder
         prepared_metas = None
     else:
         raise AttributeError("embeddings module must provide get_backend() or run()")
@@ -167,6 +197,28 @@ def build_all(
         np.save(idxdir / "vectors.npy", vectors.astype(np.float32))
         _save_metas_jsonl(metas, idxdir / "metas.jsonl")
         print(f"[RAG] Index: saved vectors.npy and metas.jsonl under {idxdir}")
+
+        # Write manifest right next to vectors ---
+        try:
+            contract = idx_mod.get_index_contract() if hasattr(idx_mod, "get_index_contract") else {"index_impl": "numpy", "distance": "cosine"}
+            write_index_manifest(
+                str(idxdir),
+                embedder=EmbedderInfo(
+                    name=str(embedder_info.get("name", "unknown")),
+                    dim=int(embedder_info.get("dim", 0)),
+                    normalize=bool(embedder_info.get("normalize", True)),
+                ),
+                index_impl=str(contract.get("index_impl", "numpy")),
+                distance=str(contract.get("distance", "cosine")),
+                num_vectors=int(vectors.shape[0]),
+                vectors_path=str(idxdir / "vectors.npy"),
+                lib_versions={"numpy": np.__version__},
+                fpa_version=None,
+            )
+            print(f"[RAG] Index: wrote manifest.json for safety")
+        except Exception as e:
+            # Be explicit but non-fatal for build; search() will still refuse later.
+            print(f"[RAG] Index: warning — failed to write manifest: {e}")
     else:
         raise AttributeError("index module must provide build() or get_default_index()")
 
@@ -189,17 +241,36 @@ def search(query: str, *, k: int = 5, index_dir: str | Path = _DEF_INDEXDIR) -> 
         print(f"[RAG] Search: missing index artifacts in {index_dir}")
         return []
 
+    # Compatibility check before loading index ---
+    emb_mod = _mod("embeddings")
+    backend = emb_mod.get_backend()
+    contract = idx_mod.get_index_contract() if hasattr(idx_mod, "get_index_contract") else {"index_impl": "numpy", "distance": "cosine"}
+    # Compute embedder identity with a minimal placeholder dim; vectors dim will be checked by manifest
+    embedder_info = _get_embedder_info(backend)
+
+    try:
+        assert_index_compatible(
+            str(index_dir),
+            current_embedder=EmbedderInfo(
+                name=str(embedder_info.get("name", "unknown")),
+                dim=int(embedder_info.get("dim", 0)),
+                normalize=bool(embedder_info.get("normalize", True)),
+            ),
+            expected_distance=str(contract.get("distance", "cosine")),
+            expected_index_impl=str(contract.get("index_impl", "numpy")),
+        )
+    except IndexCompatibilityError as e:
+        print(f"[RAG] Search refused: {e}")
+        return []
+
     import numpy as np
     vectors = np.load(vec_path).astype(np.float32)
     metas = _load_jsonl_rows(meta_path)
 
-    idx_mod = _mod("index")
-    emb_mod = _mod("embeddings")
     dim = int(vectors.shape[1]) if vectors.ndim == 2 else 0
     index = idx_mod.get_default_index(dim)
     index.add(vectors, metas)
 
-    backend = emb_mod.get_backend()
     q_vec = backend.encode([query])[0]
     hits = index.search(q_vec, k=k)
     print(f"[RAG] Search: query={query!r} k={k} -> {len(hits)} hits")

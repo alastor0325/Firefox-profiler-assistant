@@ -37,6 +37,19 @@ class DummyBackend:
             vecs.append(v)
         return np.vstack(vecs)
 
+    def get_embedder_info(self):
+        """
+        Purpose:
+        Expose a stable identity for safety checks (manifest).
+        """
+        import logging
+        log = logging.getLogger(__name__)
+        name = "dummy"
+        dim = getattr(self, "dim", 8)  # fallback in case dim is implicit
+        normalize = getattr(self, "normalize", True)
+        log.debug("DummyBackend.get_embedder_info -> name=%s dim=%d normalize=%s", name, dim, normalize)
+        return {"name": name, "dim": dim, "normalize": normalize}
+
 class SentenceTransformersBackend:
     def __init__(self, model_name: str = DEFAULT_ST_MODEL, device: Optional[str] = None):
         try:
@@ -51,6 +64,20 @@ class SentenceTransformersBackend:
     def encode(self, texts: List[str]) -> np.ndarray:  # pragma: no cover (heavy)
         emb = self.model.encode(texts, normalize_embeddings=True, convert_to_numpy=True)
         return emb.astype(np.float32)
+
+    def get_embedder_info(self):
+        """
+        Purpose:
+        Expose a stable identity for safety checks (manifest).
+        """
+        import logging
+        log = logging.getLogger(__name__)
+        model_name = getattr(self, "model_name", "sentence-transformers/all-MiniLM-L6-v2")
+        dim = getattr(self, "dim", 384)  # typical for MiniLM-L6-v2
+        normalize = getattr(self, "normalize", True)
+        log.debug("STBackend.get_embedder_info -> name=%s dim=%d normalize=%s", model_name, dim, normalize)
+        return {"name": model_name, "dim": dim, "normalize": normalize}
+
 
 def get_backend() -> EmbeddingBackend:
     import logging
