@@ -86,54 +86,9 @@ Then interact with the assistant:
 
 ---
 
-## 📚 Retrieval-Augmented Generation (RAG)
+## 📚 Project Architecture
 
-### How it works
-On startup, the CLI **automatically** looks for a TOML config at `config/rag.toml` and, if present, performs:
-1. **Ingest** — Markdown → JSONL chunks
-2. **Embeddings** — Encode chunk text with a pluggable embedding backend
-3. **Index** — Save lightweight artifacts for fast search
-
-These steps are handled by:
-- `profiler_assistant/rag/ingest.py`
-- `profiler_assistant/rag/embeddings.py`
-- `profiler_assistant/rag/index.py`
-- Orchestrated by `profiler_assistant/rag/pipeline.py`
-
-### Required config
-In `config/rag.toml`, you can specify where the RAG knowledge sources should come from.
-
-> If this file is missing or no files match, the CLI prints a message and continues without RAG.
-
-### Artifacts (generated)
-- `data/rag/chunks.jsonl` — ingested chunks (one JSON per line)
-- `data/rag/embeddings.npy` — NumPy array of embeddings for chunks
-- `.fpa_index/vectors.npy` and `.fpa_index/metas.jsonl` — lightweight “index” artifacts
-
-> These are derived and **should not be committed**.
-
-### Backends
-
-We use a swappable backend design for both embedding generation and vector indexing:
-
-- **Embeddings**
-  - `DummyBackend` (default, deterministic, no deps — best for dev/CI)
-  - `SentenceTransformersBackend` (“all-MiniLM-L6-v2”) if `sentence-transformers` is installed
-  - Switch via `FPA_EMBEDDINGS` env var (`dummy` / `sentence-transformers`)
-
-- **Index**
-  - `NumpyIndex` (default, exact cosine search, no deps)
-  - `FaissIndex` (fast large-scale search if `faiss`/`faiss-cpu` is installed)
-
-### Authoring rules
-- Start from `example_profiler_playbook.md` when creating a new doc.
-- Keep **all** required front-matter keys (even if empty).
-- Use **five required sections**:
-  1. `# Summary`
-  2. `## Signals & Evidence`
-  3. `## Analysis & Reasoning`
-  4. `## Conclusion`
-  5. `## References`
+- 📘 [Pipeline Overview](./docs/pipeline-overview.md) — end-to-end architecture, stages, storage, and runbook.
 
 ---
 
