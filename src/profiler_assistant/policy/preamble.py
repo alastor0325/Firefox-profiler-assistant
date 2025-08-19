@@ -28,15 +28,19 @@ DEFAULT_MAX_CHARS = 1600
 
 def _repo_root_from_here(current: Path) -> Path:
     """
-    Best-effort: walk upward to find the repo root that contains
-    `general-flow.md`. Falls back to current.parent if not found.
+    Best-effort: walk upward to find the repo root by checking for
+    `knowledge/analysis/general-flow.md`.
+    Falls back to current.parent if not found.
+
+    This ensures we return the repository root (the folder that contains
+    /knowledge/analysis/general-flow.md), not the file itself.
     """
+    target_rel = Path("knowledge") / "analysis" / "general-flow.md"
     for parent in [current, *current.parents]:
-        if (parent / "general-flow.md").exists():
+        if (parent / target_rel).exists():
             return parent
     # Fallback: project root likely two levels up from this file
     return current.parent
-
 
 @dataclass
 class PolicyStateStore:
