@@ -114,15 +114,6 @@ pytest
 
 ---
 
-## 📝 Troubleshooting
-
-- **No RAG prints appear**: confirm `config/rag.toml` exists and that files match your `include`/`exclude` patterns.
-- **On Windows, excludes don’t seem to work**: we normalize paths and match both relative paths and basenames; use either `**/name.md` or just `name.md` in `exclude`.
-- **Using older Python**: `tomli` will be used automatically (declared as a dependency) for reading TOML on Python < 3.11.
-
-
----
-
 ## 📦 Notes
 
 - Requires Python 3.8+
